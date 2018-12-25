@@ -167,7 +167,7 @@ var dFAinit = function(){
   }else if(href.indexOf('ask.fm') > 0){
     k = qS('.profileButton').parentNode;
     if (k) {
-      k.innerHTML += '<a class="link-green" onClick="dFAcore();">DownAlbum</a>' + 
+      k.innerHTML += '<a class="link-green" onClick="dFAcore();">DownAlbum</a>' +
         '<a class="link-green" onClick="dFAcore(true);">DownAlbum(Setup)</a>';
     } else {
       setTimeout(dFAinit, 300);
@@ -278,6 +278,16 @@ async function _addLink(k, target) {
       k.appendChild(storyBtn);
       storyBtn.addEventListener('click', () => loadStories(id));
     }
+    if (!k.querySelector(`.dHighlight[data-id="${id}"]`)) {
+      const highlightBtn = document.createElement('a');
+      highlightBtn.className = 'dHighlight';
+      highlightBtn.style.maxWidth = '200px';
+      highlightBtn.style.cursor = 'pointer';
+      highlightBtn.dataset.id = id;
+      highlightBtn.textContent = 'Download Highlights';
+      k.appendChild(highlightBtn);
+      highlightBtn.addEventListener('click', () => loadHighlights(id));
+    }
   }
   const container = getParent(k, 'article') || k;
   const albumBtn = container.querySelector('.coreSpriteRightChevron');
@@ -362,7 +372,7 @@ async function loadStories(id) {
       type: 'Stories',
     };
     items.forEach((e, i) => {
-      photodata.photos.push({ url: e.display_url, href: '' });
+      photodata.photos.push({ url: e.display_url, href: '', date: parseTime(e.taken_at_timestamp) });
       if (e.video_resources) {
         const { src } = e.video_resources[e.video_resources.length - 1];
         photodata.videos.push({ url: src, thumb: e.display_url });
@@ -376,6 +386,88 @@ async function loadStories(id) {
   } catch (e) {
     console.error(e);
     alert('Cannot load stories');
+  }
+}
+async function loadHighlights(id) {
+  // Load info on all highlight reels
+  const hash = '7c16654f22c819fb63d1183034a5162f';
+  const variables = `{"user_id":${id},"include_chaining":true,` +
+        `"include_reel":true,"include_suggested_users":false,` +
+        `"include_logged_out_extras":false,"include_highlight_reels":true}`;
+  const options = {
+    credentials: 'include',
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-Instagram-GIS': md5(rhx_gis + ':' + variables),
+    },
+  };
+  try {
+    const url = `${base}graphql/query/?query_hash=${hash}&variables=${variables}`;
+    let r = await fetch(url, options);
+    r = await r.json();
+    if (!r.data.user.edge_highlight_reels.edges || !r.data.user.edge_highlight_reels.edges.length) {
+      throw Error('No highlights loaded');
+    }
+    // Extract IDs from each reel
+    const highlightReelIDs = [];
+    r.data.user.edge_highlight_reels.edges.forEach(reel => {
+        highlightReelIDs.push(reel.node.id);
+    });
+    // Load media using the IDs
+    const hash2 = '45246d3fe16ccc6577e0bd297a5db1ab';
+    const variables2 = `{"highlight_reel_ids":[${highlightReelIDs}],"reel_ids":[],` +
+        `"location_ids":[],"precomposed_overlay":false}`;
+    const options2 = {
+      credentials: 'include',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-Instagram-GIS': md5(rhx_gis + ':' + variables2),
+      },
+    };
+    const url2 = `${base}graphql/query/?query_hash=${hash2}&variables=${variables2}`;
+    let r2 = await fetch(url2, options2);
+    r2 = await r2.json();
+    openWindow();
+    // Extract every photo/video individually across multiple reels
+    const media = [];
+    var owner = r2.data.reels_media[0].owner;
+    var last = r2.data.reels_media[0].latest_reel_media;
+    r2.data.reels_media.forEach(e => {
+      e.items.forEach(e2 => {
+        // Calculate the most recent timestamp
+        if (e2.taken_at_timestamp > last) {
+          last = e2.taken_at_timestamp;
+        }
+        media.push(e2);
+      });
+    });
+    const photodata = {
+      aDes: '',
+      aName: 'Highlights',
+      aAuth: owner.username,
+      aLink: `${base}${owner.username}`,
+      aTime: last ? 'Last Update: ' + parseTime(last) : '',
+      newL: true,
+      newLayout: true,
+      photos: [],
+      videos: [],
+      type: 'Highlight Reel',
+    };
+    media.forEach((e, i) => {
+      photodata.photos.push({ url: e.display_url, href: '', date: parseTime(e.taken_at_timestamp) });
+      if (e.video_resources) {
+        const { src } = e.video_resources[e.video_resources.length - 1];
+        photodata.videos.push({ url: src, thumb: e.display_url });
+      }
+    });
+    if (isWinReady) {
+      sendRequest({ type:'export', data: photodata });
+    } else {
+      toExport = photodata;
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Cannot load highlights');
   }
 }
 function getFbEnv() {
@@ -786,7 +878,7 @@ function fbAjax(){
       var t=targetJS[k].textContent,content=t.slice(t.indexOf('(2, {')+4,t.indexOf('}, true);}')+1);
       if(!content.length||t.indexOf('JSONPTransport')<0){continue;}
       content=JSON.parse(content);
-      if (!content.payload || !content.payload.jsmods || 
+      if (!content.payload || !content.payload.jsmods ||
         !content.payload.jsmods.require) {
         alert('Autoload failed, go to photo tab and try again.');
         return output();
@@ -1039,7 +1131,7 @@ function getPhotos(){
     var ajaxify = unescape(elms[i].getAttribute('ajaxify')) || '';
     var href = ajaxify.indexOf('fbid=') > -1 ? ajaxify : elms[i].href;
     var isVideo = (href.indexOf('/videos/') > -1 || g.isVideo);
-    var parentSrc = elms[i].parentNode ? 
+    var parentSrc = elms[i].parentNode ?
       elms[i].parentNode.getAttribute('data-starred-src') : '';
     var bg = !isVideo ? elms[i].querySelector('img, i') :
       elms[i].querySelector(g.isPage ? 'img' : 'div[style], .uiVideoLinkImg');
@@ -1469,7 +1561,7 @@ function fbAutoLoad(elms){
       var tnext = qS('.fbPhotoAlbumTitle').nextSibling;
       var isCollab = tnext && tnext.className != 'fbPhotoAlbumActions' &&
         tnext.querySelectorAll('[data-hovercard]').length > 1;
-      
+
       if (location.href.match(/collection_token/) || isCollab || g.isVideo) {
         aInfo.collection_token = token;
         aInfo.profile_id = user;
@@ -1581,7 +1673,7 @@ function fbAutoLoad(elms){
     }
     aInfo = {
       collection_token: p,
-      cursor: g.cursor, 
+      cursor: g.cursor,
       disablepager: false, overview: false,
       profile_id: userId,
       pagelet_token: g.pageletToken,
@@ -1603,7 +1695,7 @@ function fbAutoLoad(elms){
       'TimelinePhotos' + (isAl ? 'Album' : (isPS ? 'Stream' : '')));
     ajaxAlbum = location.origin + '/ajax/pagelet/generic.php/' + targetURL +
       'Pagelet?ajaxpipe=1&ajaxpipe_token=' + g.Env.ajaxpipe_token +
-      '&no_script_path=1&data=' + JSON.stringify(aInfo) + '&__user=' + 
+      '&no_script_path=1&data=' + JSON.stringify(aInfo) + '&__user=' +
       g.Env.user + '&__a=1&__adt=2';
   }else{
     var req = 5+(qSA('.fbStarGrid>div').length-8)/8*2
@@ -1953,7 +2045,7 @@ function getTwitter(){
           title: title,
           url: url.replace(':large', '') + ':orig',
           href: 'https://twitter.com' + date.parentNode.getAttribute('href'),
-          date: date ? parseTime(+date.getAttribute('data-time')) : '' 
+          date: date ? parseTime(+date.getAttribute('data-time')) : ''
         });
         if (!r.min_position) {
           var max_id = (date.parentNode.getAttribute('href') || '')
@@ -2089,7 +2181,7 @@ function parsePinterest(list){
       continue;
     }
     photodata.photos.push({
-      title: list[j].description + '<br><a taget="_blank" href="' + 
+      title: list[j].description + '<br><a taget="_blank" href="' +
         list[j].link + '">Pinned from ' + list[j].domain + '</a>',
       url: (list[j].images.orig || list[j].images['736x']).url,
       href: 'https://www.pinterest.com/pin/' + list[j].id + '/',
@@ -2163,7 +2255,7 @@ function getPinterest(){
         break;
       case 'ProfilePage':
         switch (board[2]) {
-          case 'pins': 
+          case 'pins':
             g.bookmarks = {username: board[1], field_set_key: 'grid_item'};
             g.resource = 'UserPinsResource';
             break;
@@ -2185,7 +2277,7 @@ function getPinterest(){
         g.bookmarks = {query: board[2]};
         break;
     }
-    if (type === 'SearchPage' || type === 'InterestFeedPage') {   
+    if (type === 'SearchPage' || type === 'InterestFeedPage') {
       if (r.results) {
         parsePinterest(r.results);
       }
@@ -2241,7 +2333,7 @@ function getPinterest_sub(){
   }
 }
 function getAskFM() {
-  var url = g.page || (location.protocol + '//ask.fm/' + g.username + 
+  var url = g.page || (location.protocol + '//ask.fm/' + g.username +
     '?no_prev_link=true');
   var xhr = new XMLHttpRequest();
   xhr.onload = function() {
@@ -2272,7 +2364,7 @@ function getAskFM() {
       if (content) {
         content.removeChild(box.querySelector('.readMore'));
       }
-      title = 'Q: ' +  
+      title = 'Q: ' +
         getText('.streamItem_header', 0, box) +
         ' <br>' + 'A: ' + getText('.streamItem_content', 0, box);
       photodata.photos.push({
@@ -2412,7 +2504,7 @@ var dFAcore = function(setup, bypass) {
           alert('Need to reload for required variable.');
           return location.reload();
         }
-      } catch(e) {alert('Cannot load required variable!');} 
+      } catch(e) {alert('Cannot load required variable!');}
       g.isTagged = location.href.indexOf('/tagged/') > 0;
       g.Env.media = g.isTagged ? { count: 0, edges: [] } :
         g.Env.user.edge_owner_to_timeline_media;
